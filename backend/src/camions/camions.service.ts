@@ -77,7 +77,7 @@ export class CamionsService {
   async remove(id: string) {
     const nbTournees = await this.prisma.tournee.count({ where: { camionId: id } });
     if (nbTournees > 0) {
-      throw new ConflictException('Impossible de supprimer ce camion : il a des tournées associées.');
+      throw new ConflictException('Impossible de supprimer ce camion : il a des tournées associées...');
     }
     await this.prisma.camion.delete({ where: { id } });
   }

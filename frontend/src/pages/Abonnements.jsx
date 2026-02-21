@@ -33,7 +33,7 @@ const Abonnements = () => {
         setSubscription(subData && subData.planId ? subData : null);
       } catch (e) {
         if (!cancelled) {
-          toast.error('Impossible de charger les offres.');
+          toast.error('Impossible de charger les offres...');
           setPlans([]);
         }
       } finally {
