@@ -1,0 +1,250 @@
+// Schéma Prisma - Corlay / FuelDispatch
+// Base PostgreSQL (créée dans pgAdmin : corlay_db)
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------- AUTH / UTILISATEURS ----------
+model User {
+  id                String   @id @default(cuid())
+  email             String   @unique
+  passwordHash      String
+  nom               String
+  prenom            String
+  role              String   // administrateur, dispatcher, manager-commercial, etc.
+  telephone         String?
+  actif             Boolean  @default(true)
+  dateCreation      String
+  derniereConnexion String?
+}
+
+// ---------- SUIVI / VÉHICULES ----------
+model Vehicle {
+  id          String   @id
+  driver      String
+  destination String
+  status      String   // transit, chargement, livraison
+  progress    Int      @default(0)
+  eta         String?
+  positionLat Float
+  positionLng Float
+  speed       Int      @default(0)
+  route       String?
+  hasDeviation Boolean @default(false)
+}
+
+// ---------- COMMANDES ----------
+model Commande {
+  id                          String   @id
+  client                      String
+  type                        String   // Diesel B7, Essence E10, etc.
+  quantite                    Int
+  date                        String
+  statut                      String   // en_attente_tresorerie, valide_tresorerie, en_attente_facturation, validee, en-transit, livree, annulee
+  priorite                    String   // normale, urgent, critique
+  typeCommande                String   // interne, externe
+  referenceCommandeExterne    String?
+  destination                 String?  // Ville ou adresse de livraison (Aboisso, Bonoua, Yaou, etc.) pour regrouper les tournées
+  // Validation Trésorerie
+  paiementRecu                Boolean?
+  moyenPaiement               String?  // cheque, virement, especes, autre
+  numeroCheque                 String?
+  numeroTransactionVirement   String?
+  dateValidationTresorerie    String?
+  // Validation Facturation
+  numeroBonCommandeInterne    String?
+  dateValidationFacturation   String?
+}
+
+// ---------- STOCKS / DÉPÔTS ----------
+model Depot {
+  id     String @id
+  nom    String
+  statut String // operationnel, niveau-bas
+  tanks  Tank[]
+}
+
+model Tank {
+  id         String @id
+  depotId    String
+  depot      Depot  @relation(fields: [depotId], references: [id], onDelete: Cascade)
+  tankNumber String
+  name       String
+  type       String // diesel, essence
+  percentage Int
+  current    Int
+  capacity   Int
+}
+
+// ---------- RELEVÉS STOCK PSL (stock réel déclaré par PSL vs stock théorique) ----------
+model ReleveStockPSL {
+  id                   String   @id @default(cuid())
+  date                 String   // YYYY-MM-DD
+  typeCarburant        String   // diesel, essence, etc.
+  quantiteDeclareePSL  Int      // Stock déclaré par PSL (email du matin)
+  stockTheorique       Int      // Snapshot du stock théorique (logiciel) au moment du relevé
+  commentaire          String?
+  @@unique([date, typeCarburant])
+}
+
+// ---------- COMMANDES D'ACHAT (quantité commandée vs quantité reçue) ----------
+model CommandeAchat {
+  id                String   @id @default(cuid())
+  date              String   // Date de réception / commande
+  fournisseur       String?  // Société auprès de qui Corlay achète
+  typeCarburant     String   // diesel, essence, etc.
+  quantiteCommandee Int     // Quantité commandée
+  quantiteRecue     Int     // Quantité effectivement reçue
+  commentaire       String?
+}
+
+// ---------- TRANSPORTEURS (compagnies / entreprises de transport) ----------
+model Transporteur {
+  id           String   @id @default(cuid())
+  nom          String   // Raison sociale / nom de la compagnie
+  telephone    String
+  nomContact   String?  // Nom du contact
+  adresse      String?
+  email        String?
+  couleur      String?  // Clé couleur (orange, blue, green, purple, red, teal, indigo, amber)
+  dateCreation String
+  camions      Camion[]
+}
+
+// ---------- CAMIONS (flotte d'un transporteur) ----------
+model Camion {
+  id                   String   @id @default(cuid())
+  transporteurId       String
+  transporteur         Transporteur @relation(fields: [transporteurId], references: [id], onDelete: Cascade)
+  immatriculation      String   // Numéro de plaque
+  marque               String?  // Marque du camion (ex. Mercedes-Benz, Volvo)
+  couleur              String?
+  statut               String   // disponible, en-mission, maintenance
+  chauffeur            String?  // Nom du chauffeur assigné ou habituel
+  telephoneChauffeur   String?
+  dateCreation         String
+  missions             Int      @default(0)
+  tauxReussite         Int      @default(0)
+  ponctualite          Int      @default(0)
+  note                 Float    @default(0)
+  dernierePosition     String?
+  prochaineMaintenance String?
+  compartiments        Compartiment[]
+  tournees             Tournee[]
+}
+
+// ---------- COMPARTIMENTS (cuves d'un camion) ----------
+model Compartiment {
+  id             String @id @default(cuid())
+  camionId       String
+  camion         Camion @relation(fields: [camionId], references: [id], onDelete: Cascade)
+  ordre          Int    // 1, 2, 3...
+  capaciteLitres Int    // Capacité de ce compartiment en litres
+}
+
+// ---------- TOURNÉES (regroupement de livraisons pour un même camion) ----------
+model Tournee {
+  id                String   @id
+  camionId          String   // Camion assigné (appartient à un transporteur)
+  camion            Camion   @relation(fields: [camionId], references: [id], onDelete: Restrict)
+  statut            String   // planifiee, en-cours, terminee
+  dateCreation      String
+  dateDepartPrevue  String?  // Date (YYYY-MM-DD) du départ
+  heureDepartPrevue String?  // Heure de départ (HH:mm) pour calcul des ETA
+  bonsLivraison     BonLivraison[]
+}
+
+// ---------- BONS DE LIVRAISON ----------
+model BonLivraison {
+  id                      String   @id
+  tourneeId               String?  // Si partie d'une tournée (plusieurs BL pour un même camion)
+  tournee                 Tournee? @relation(fields: [tourneeId], references: [id], onDelete: SetNull)
+  ordrePassage            Int?    // Ordre dans l'itinéraire (1 = 1ère livraison)
+  dureeTrajetMinutes      Int?    // Temps pour atteindre CE point depuis le précédent (ou dépôt)
+  dureeDechargementMinutes Int?   // Temps de déchargement sur place (à inclure dans l'ETA du client suivant)
+  numeroCommande          String
+  client                  String
+  chauffeur                String
+  vehicule                 String
+  typeCarburant            String
+  quantiteCommandee        Int
+  quantiteLivree           Int?
+  dateEmission             String
+  dateLivraison            String?
+  heureDepart              String?
+  heureArrivee             String?
+  heureArriveePrevue       String? // Heure d'arrivée prévue (calculée ou saisie, ex. "13:30")
+  statut                   String   // en-attente, en-transit, livré
+  signature                Boolean  @default(false)
+  observations             String?
+}
+
+// ---------- ALERTES ----------
+model Alerte {
+  id        String   @id
+  type      String   // retard, stock, deviation, maintenance
+  severite  String   // critique, urgent, attention, info
+  titre     String
+  message   String
+  vehicule  String?
+  depot     String?
+  timestamp String
+  lu        Boolean  @default(false)
+}
+
+// ---------- INCIDENTS ----------
+model Incident {
+  id             String   @id
+  type           String   // panne-vehicule, retard-livraison, fuite-produit, etc.
+  severite       String   // critique, moyenne, faible
+  titre          String
+  description    String
+  statut         String   // nouveau, en-cours, resolu, ferme
+  vehicule       String?
+  chauffeur      String?
+  dateIncident   String
+  localisation   String?
+  bl             String?
+  dateResolution String?
+  metadata       String?  // JSON string pour actions/historique
+}
+
+// ---------- AUDIT (traces des actions utilisateur) ----------
+model AuditLog {
+  id          String   @id @default(cuid())
+  userId      String
+  userName    String
+  action      String   // creation, modification, suppression, consultation
+  entity      String   // commande, bon-livraison, utilisateur, stock, etc.
+  entityId    String
+  description String
+  timestamp   String
+}
+
+// ---------- ABONNEMENTS (plans et souscriptions) ----------
+model Plan {
+  id             String         @id   // free, premium, enterprise
+  name           String
+  price          Int?           // null = sur mesure
+  period         String         // Toujours, An, Sur mesure
+  color          String         // gray, orange, purple
+  icon           String         // shield, star, crown
+  recommended    Boolean        @default(false)
+  features       String         // JSON: [{ text, included }]
+  subscriptions  Subscription[]
+}
+
+model Subscription {
+  id        String   @id @default(cuid())
+  userId    String
+  planId    String
+  startDate String
+  endDate   String?  // null = illimité (ex: gratuit)
+  plan      Plan     @relation(fields: [planId], references: [id], onDelete: Restrict)
+}

@@ -1,0 +1,10 @@
+import { Module } from '@nestjs/common';
+import { TransporteursController } from './transporteurs.controller';
+import { TransporteursService } from './transporteurs.service';
+
+@Module({
+  controllers: [TransporteursController],
+  providers: [TransporteursService],
+  exports: [TransporteursService],
+})
+export class TransporteursModule {}
